@@ -20,10 +20,11 @@ export async function createRoom(req, res) {
 
     const room = await pool.query(
       `INSERT INTO rooms (name, password, has_password, created_by) 
-       VALUES ($1, $2, $3, $4) RETURNING id, name, has_password, created_at, created_by`,
+       VALUES ($1, $2, $3, $4) RETURNING id, name, has_password, created_at`,
       [name, hashedPassword, has_password || false, userId]
     );
 
+    // Auto join the creator
     await pool.query(
       `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2)`,
       [room.rows[0].id, userId]
@@ -50,6 +51,7 @@ export async function joinRoom(req, res) {
 
     const room = roomResult.rows[0];
 
+    // If already a member, just allow entry
     const isMember = await pool.query(
       "SELECT * FROM room_members WHERE room_id = $1 AND user_id = $2",
       [roomId, userId]
@@ -58,6 +60,7 @@ export async function joinRoom(req, res) {
       return res.status(200).json({ success: true, message: "Already a member" });
     }
 
+    // Check password
     if (room.has_password) {
       if (!password) {
         return res.status(400).json({ success: false, message: "Password required" });
@@ -84,9 +87,8 @@ export async function joinRoom(req, res) {
 // Get all rooms
 export async function getRooms(req, res) {
   try {
-    const userId = req.user.id;
     const rooms = await pool.query(
-      `SELECT id, name, has_password, created_at, created_by,
+      `SELECT id, name, has_password, created_at,
        (SELECT COUNT(*) FROM room_members WHERE room_id = rooms.id) as member_count
        FROM rooms ORDER BY created_at DESC`
     );
@@ -105,7 +107,7 @@ export async function getRoom(req, res) {
     const { roomId } = req.params;
 
     const room = await pool.query(
-      `SELECT id, name, has_password, created_at, created_by FROM rooms WHERE id = $1`,
+      `SELECT id, name, has_password, created_at FROM rooms WHERE id = $1`,
       [roomId]
     );
 
@@ -114,31 +116,6 @@ export async function getRoom(req, res) {
     }
 
     return res.status(200).json({ success: true, room: room.rows[0] });
-
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ success: false, message: error.message });
-  }
-}
-
-// Delete a room (only creator)
-export async function deleteRoom(req, res) {
-  try {
-    const { roomId } = req.params;
-    const userId = req.user.id;
-
-    const roomResult = await pool.query("SELECT * FROM rooms WHERE id = $1", [roomId]);
-    if (roomResult.rows.length === 0) {
-      return res.status(404).json({ success: false, message: "Room not found" });
-    }
-
-    if (roomResult.rows[0].created_by !== userId) {
-      return res.status(403).json({ success: false, message: "Only the creator can delete this room" });
-    }
-
-    await pool.query("DELETE FROM rooms WHERE id = $1", [roomId]);
-
-    return res.status(200).json({ success: true, message: "Room deleted successfully" });
 
   } catch (error) {
     console.error(error);
