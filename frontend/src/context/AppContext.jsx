@@ -43,7 +43,9 @@ export const AppContextProvider = (props) => {
       transports: ["websocket"],
     });
 
-    socket.on("connect", () => console.log("🔌 Socket connected"));
+    socket.on("connect", () => {
+      console.log("🔌 Socket connected");
+    });
     socket.on("disconnect", () => console.log("❌ Socket disconnected"));
 
     // Only add message if it belongs to the currently open room
@@ -101,6 +103,8 @@ export const AppContextProvider = (props) => {
       const res = await axios.get(backendUrl + "/api/user/data");
       if (res.data.success) {
         setUserData(res.data.userData);
+        // Register with socket so DMs are routed correctly
+        socketRef.current?.emit("register", res.data.userData.id);
       } else {
         toast.error(res.data.message);
       }
