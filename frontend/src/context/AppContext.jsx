@@ -20,8 +20,13 @@ export const AppContextProvider = (props) => {
   const [allUsers, setAllUsers] = useState([]);
 
   const socketRef = useRef(null);
+  const selectedRoomRef = useRef(null);
+  const selectedUserRef = useRef(null);
 
-  // Set token in axios headers
+  // Keep refs in sync so socket listeners always have latest values
+  useEffect(() => { selectedRoomRef.current = selectedRoom; }, [selectedRoom]);
+  useEffect(() => { selectedUserRef.current = selectedUser; }, [selectedUser]);
+
   const setAuthToken = (token) => {
     if (token) {
       axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
@@ -30,7 +35,6 @@ export const AppContextProvider = (props) => {
     }
   };
 
-  // Init socket
   const initSocket = (token) => {
     if (socketRef.current) return;
 
@@ -42,12 +46,29 @@ export const AppContextProvider = (props) => {
     socket.on("connect", () => console.log("🔌 Socket connected"));
     socket.on("disconnect", () => console.log("❌ Socket disconnected"));
 
+    // Only add message if it belongs to the currently open room
     socket.on("receive_message", (message) => {
-      setMessages((prev) => [...prev, message]);
+      if (selectedRoomRef.current?.id === message.room_id) {
+        setMessages((prev) => {
+          // Prevent duplicates by checking message id
+          if (prev.find((m) => m.id === message.id)) return prev;
+          return [...prev, message];
+        });
+      }
     });
 
+    // Only add DM if it belongs to the currently open conversation
     socket.on("receive_dm", (message) => {
-      setDmMessages((prev) => [...prev, message]);
+      const currentUser = selectedUserRef.current;
+      if (
+        currentUser &&
+        (message.sender_id === currentUser.id || message.receiver_id === currentUser.id)
+      ) {
+        setDmMessages((prev) => {
+          if (prev.find((m) => m.id === message.id)) return prev;
+          return [...prev, message];
+        });
+      }
     });
 
     socket.on("room_users", (users) => {
@@ -57,7 +78,6 @@ export const AppContextProvider = (props) => {
     socketRef.current = socket;
   };
 
-  // Check auth state on page load
   const getAuthState = async () => {
     const token = localStorage.getItem("token");
     if (!token) return;
@@ -76,7 +96,6 @@ export const AppContextProvider = (props) => {
     }
   };
 
-  // Get logged-in user
   const getUserData = async () => {
     try {
       const res = await axios.get(backendUrl + "/api/user/data");
@@ -90,7 +109,6 @@ export const AppContextProvider = (props) => {
     }
   };
 
-  // Get all users for DMs
   const getAllUsers = async () => {
     try {
       const res = await axios.get(backendUrl + "/api/user/all");
@@ -100,7 +118,6 @@ export const AppContextProvider = (props) => {
     }
   };
 
-  // Get all rooms
   const getRooms = async () => {
     try {
       const res = await axios.get(backendUrl + "/api/rooms");
@@ -110,7 +127,6 @@ export const AppContextProvider = (props) => {
     }
   };
 
-  // Get room messages
   const getRoomMessages = async (roomId) => {
     try {
       const res = await axios.get(backendUrl + `/api/messages/room/${roomId}`);
@@ -120,7 +136,6 @@ export const AppContextProvider = (props) => {
     }
   };
 
-  // Get DM messages
   const getDmMessages = async (userId) => {
     try {
       const res = await axios.get(backendUrl + `/api/messages/dm/${userId}`);
@@ -130,11 +145,17 @@ export const AppContextProvider = (props) => {
     }
   };
 
-  // Send room message
+  // Send room message — add to local state immediately, socket notifies others
   const sendMessage = async (roomId, content) => {
     try {
       const res = await axios.post(backendUrl + "/api/messages/send", { roomId, content });
       if (res.data.success) {
+        // Add to own messages immediately
+        setMessages((prev) => {
+          if (prev.find((m) => m.id === res.data.message.id)) return prev;
+          return [...prev, res.data.message];
+        });
+        // Emit so other users in the room receive it
         socketRef.current?.emit("send_message", {
           roomId,
           message: res.data.message,
@@ -145,19 +166,25 @@ export const AppContextProvider = (props) => {
     }
   };
 
-  // Send DM
+  // Send DM — add to local state immediately, emit so receiver gets it
   const sendDm = async (receiverId, content) => {
     try {
       const res = await axios.post(backendUrl + "/api/messages/dm/send", { receiverId, content });
       if (res.data.success) {
-        setDmMessages((prev) => [...prev, res.data.message]);
+        setDmMessages((prev) => {
+          if (prev.find((m) => m.id === res.data.message.id)) return prev;
+          return [...prev, res.data.message];
+        });
+        socketRef.current?.emit("send_dm", {
+          receiverId,
+          message: res.data.message,
+        });
       }
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to send message");
     }
   };
 
-  // Join room via socket
   const joinRoomSocket = (roomId) => {
     socketRef.current?.emit("join_room", {
       roomId,
@@ -166,9 +193,7 @@ export const AppContextProvider = (props) => {
     });
   };
 
-  useEffect(() => {
-    getAuthState();
-  }, []);
+  useEffect(() => { getAuthState(); }, []);
 
   useEffect(() => {
     if (isLoggedin) {
@@ -181,12 +206,16 @@ export const AppContextProvider = (props) => {
     if (selectedRoom) {
       getRoomMessages(selectedRoom.id);
       joinRoomSocket(selectedRoom.id);
+    } else {
+      setMessages([]);
     }
   }, [selectedRoom]);
 
   useEffect(() => {
     if (selectedUser) {
       getDmMessages(selectedUser.id);
+    } else {
+      setDmMessages([]);
     }
   }, [selectedUser]);
 
@@ -204,6 +233,7 @@ export const AppContextProvider = (props) => {
     onlineUsers,
     activeTab, setActiveTab,
     sendMessage, sendDm,
+    getRoomMessages, getDmMessages,
     socket: socketRef,
   };
 

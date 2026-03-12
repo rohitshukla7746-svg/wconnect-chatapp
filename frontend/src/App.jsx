@@ -20,8 +20,8 @@ const App = () => {
     <div >
       <ToastContainer />
      <Routes>
-      
-      <Route path='/' element={ isLoggedin ? <Home/> : <Navigate to='/login' /> }  />
+       {/* isLoggedin ? <Home/> : <Navigate to='/login' /> */}
+      <Route path='/' element={ <Home/> }  />
       <Route path='/login' element={<Login/>} /> 
       <Route path='/email-verify' element={<EmailVerify/>}/> 
       <Route path='/reset-password' element={<ResetPassword/>}/>
