@@ -10,7 +10,6 @@ export async function sendMessage(req, res) {
       return res.status(400).json({ success: false, message: "Room ID and content are required" });
     }
 
-    // Check if user is a member of the room
     const isMember = await pool.query(
       "SELECT * FROM room_members WHERE room_id = $1 AND user_id = $2",
       [roomId, senderId]
@@ -27,11 +26,7 @@ export async function sendMessage(req, res) {
       [roomId, senderId, content]
     );
 
-    // Get sender details
-    const sender = await pool.query(
-      "SELECT id, name FROM users1 WHERE id = $1",
-      [senderId]
-    );
+    const sender = await pool.query("SELECT id, name FROM users1 WHERE id = $1", [senderId]);
 
     const fullMessage = {
       ...message.rows[0],
@@ -52,7 +47,6 @@ export async function getRoomMessages(req, res) {
     const { roomId } = req.params;
     const userId = req.user.id;
 
-    // Check if user is a member
     const isMember = await pool.query(
       "SELECT * FROM room_members WHERE room_id = $1 AND user_id = $2",
       [roomId, userId]
@@ -73,6 +67,31 @@ export async function getRoomMessages(req, res) {
     );
 
     return res.status(200).json({ success: true, messages: messages.rows });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+// Delete a room message (only sender)
+export async function deleteMessage(req, res) {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user.id;
+
+    const msg = await pool.query("SELECT * FROM messages WHERE id = $1", [messageId]);
+    if (msg.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Message not found" });
+    }
+
+    if (msg.rows[0].sender_id !== userId) {
+      return res.status(403).json({ success: false, message: "You can only delete your own messages" });
+    }
+
+    await pool.query("DELETE FROM messages WHERE id = $1", [messageId]);
+
+    return res.status(200).json({ success: true, message: "Message deleted", messageId });
 
   } catch (error) {
     console.error(error);
@@ -124,6 +143,31 @@ export async function getDirectMessages(req, res) {
     );
 
     return res.status(200).json({ success: true, messages: messages.rows });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+// Delete a DM (only sender)
+export async function deleteDirectMessage(req, res) {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user.id;
+
+    const msg = await pool.query("SELECT * FROM direct_messages WHERE id = $1", [messageId]);
+    if (msg.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Message not found" });
+    }
+
+    if (msg.rows[0].sender_id !== userId) {
+      return res.status(403).json({ success: false, message: "You can only delete your own messages" });
+    }
+
+    await pool.query("DELETE FROM direct_messages WHERE id = $1", [messageId]);
+
+    return res.status(200).json({ success: true, message: "Message deleted", messageId });
 
   } catch (error) {
     console.error(error);

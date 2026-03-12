@@ -35,7 +35,7 @@ export const AppContextProvider = (props) => {
     }
   };
 
-  const initSocket = (token) => {
+  const initSocket = (token, userId) => {
     if (socketRef.current) return;
 
     const socket = io(backendUrl, {
@@ -45,14 +45,17 @@ export const AppContextProvider = (props) => {
 
     socket.on("connect", () => {
       console.log("🔌 Socket connected");
+      // Register immediately on connect so DMs are routed correctly
+      socket.emit("register", userId);
+      console.log("✅ Registered userId:", userId);
     });
+
     socket.on("disconnect", () => console.log("❌ Socket disconnected"));
 
     // Only add message if it belongs to the currently open room
     socket.on("receive_message", (message) => {
       if (selectedRoomRef.current?.id === message.room_id) {
         setMessages((prev) => {
-          // Prevent duplicates by checking message id
           if (prev.find((m) => m.id === message.id)) return prev;
           return [...prev, message];
         });
@@ -77,6 +80,11 @@ export const AppContextProvider = (props) => {
       setOnlineUsers(users);
     });
 
+    // When another user creates a room, refresh the list
+    socket.on("room_created", () => {
+      getRooms();
+    });
+
     socketRef.current = socket;
   };
 
@@ -88,8 +96,11 @@ export const AppContextProvider = (props) => {
       const res = await axios.get(backendUrl + "/api/auth/is-auth");
       if (res.data.success) {
         setIsLoggedin(true);
-        getUserData();
-        initSocket(token);
+        const userRes = await axios.get(backendUrl + "/api/user/data");
+        if (userRes.data.success) {
+          setUserData(userRes.data.userData);
+          initSocket(token, userRes.data.userData.id);
+        }
       }
     } catch (error) {
       if (error.response?.status !== 401) console.log(error);
@@ -103,8 +114,6 @@ export const AppContextProvider = (props) => {
       const res = await axios.get(backendUrl + "/api/user/data");
       if (res.data.success) {
         setUserData(res.data.userData);
-        // Register with socket so DMs are routed correctly
-        socketRef.current?.emit("register", res.data.userData.id);
       } else {
         toast.error(res.data.message);
       }

@@ -11,6 +11,11 @@ export const initSocket = (io) => {
       console.log(`✅ User ${userId} registered with socket ${socket.id}`);
     });
 
+    // Broadcast new room to all users
+    socket.on("new_room", (room) => {
+      socket.broadcast.emit("room_created", room);
+    });
+
     socket.on("join_room", ({ roomId, userId, username }) => {
       socket.join(roomId);
       if (!roomUsers[roomId]) roomUsers[roomId] = [];
