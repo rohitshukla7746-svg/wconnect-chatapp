@@ -79,6 +79,15 @@ const OnlineIcon = () => (
   </svg>
 );
 
+const TrashIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6"/>
+    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+    <path d="M10 11v6M14 11v6"/>
+    <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+  </svg>
+);
+
 const SideBar = () => {
   const navigate = useNavigate();
   const {
@@ -167,6 +176,20 @@ const SideBar = () => {
       }
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to join room");
+    }
+  };
+
+  const handleDeleteRoom = async (roomId) => {
+    if (!window.confirm("Delete this room? This cannot be undone.")) return;
+    try {
+      const res = await axios.delete(`${backendUrl}/api/rooms/${roomId}`);
+      if (res.data.success) {
+        toast.success("Room deleted!");
+        getRooms();
+        if (selectedRoom?.id === roomId) setSelectedRoom(null);
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to delete room");
     }
   };
 
@@ -273,7 +296,7 @@ const SideBar = () => {
                 <div
                   key={room.id}
                   onClick={() => handleSelectRoom(room)}
-                  className={`flex items-center justify-between px-3 py-3 rounded-xl cursor-pointer mb-1 transition-all ${selectedRoom?.id === room.id ? "bg-indigo-600/20 border border-indigo-500/30" : "hover:bg-white/5"}`}
+                  className={`flex items-center justify-between px-3 py-3 rounded-xl cursor-pointer mb-1 transition-all group ${selectedRoom?.id === room.id ? "bg-indigo-600/20 border border-indigo-500/30" : "hover:bg-white/5"}`}
                 >
                   <div className='flex items-center gap-3'>
                     <span className='text-gray-500'><HashIcon /></span>
@@ -282,7 +305,18 @@ const SideBar = () => {
                       <p className='text-xs text-gray-500'>{room.member_count} members</p>
                     </div>
                   </div>
-                  {room.has_password && <span className='text-gray-500'><LockIcon /></span>}
+                  <div className='flex items-center gap-2'>
+                    {room.has_password && <span className='text-gray-500'><LockIcon /></span>}
+                    {room.created_by === userData?.id && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteRoom(room.id); }}
+                        className='text-gray-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 p-1'
+                        title="Delete room"
+                      >
+                        <TrashIcon />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))
           )}
