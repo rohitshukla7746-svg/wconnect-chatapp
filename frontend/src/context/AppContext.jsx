@@ -225,7 +225,7 @@ export const AppContextProvider = (props) => {
     userData, setUserData,
     getUserData, setAuthToken,
     rooms, setRooms, getRooms,
-    allUsers,
+    allUsers, getAllUsers,
     selectedRoom, setSelectedRoom,
     selectedUser, setSelectedUser,
     messages, setMessages,

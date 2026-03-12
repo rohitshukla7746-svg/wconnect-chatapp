@@ -1,4 +1,4 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppContent } from '../context/AppContext';
 import axios from 'axios';
@@ -87,7 +87,7 @@ const SideBar = () => {
     selectedRoom, setSelectedRoom,
     selectedUser, setSelectedUser,
     onlineUsers, activeTab, setActiveTab,
-    allUsers,
+    allUsers, getAllUsers,
   } = useContext(AppContent);
 
   const [search, setSearch] = useState("");
@@ -95,6 +95,11 @@ const SideBar = () => {
   const [showJoinRoom, setShowJoinRoom] = useState(null);
   const [newRoom, setNewRoom] = useState({ name: "", password: "", hasPassword: false });
   const [joinPassword, setJoinPassword] = useState("");
+
+  // Refresh users list every time DMs tab is opened
+  useEffect(() => {
+    if (activeTab === "dms") getAllUsers();
+  }, [activeTab]);
 
   const sendVerificationOtp = async () => {
     try {
