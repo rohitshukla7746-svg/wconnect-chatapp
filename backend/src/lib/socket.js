@@ -8,11 +8,11 @@ export const initSocket = (io) => {
   };
 
   io.on("connection", (socket) => {
-    console.log("🔌 User connected:", socket.id);
+    console.log(" User connected:", socket.id);
 
     socket.on("register", (userId) => {
       onlineUsers[userId] = socket.id;
-      console.log(`✅ User ${userId} registered with socket ${socket.id}`);
+      console.log(` User ${userId} registered with socket ${socket.id}`);
       broadcastOnlineUsers(); // notify everyone
     });
 
@@ -61,7 +61,7 @@ export const initSocket = (io) => {
         io.to(roomId).emit("room_users", roomUsers[roomId]);
       }
       broadcastOnlineUsers(); // notify everyone of disconnect
-      console.log("❌ User disconnected:", socket.id);
+      console.log(" User disconnected:", socket.id);
     });
   });
 };
