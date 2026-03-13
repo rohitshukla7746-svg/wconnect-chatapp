@@ -5,8 +5,7 @@ const MicOnIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
     <path d="M19 10v2a7 7 0 01-14 0v-2"/>
-    <line x1="12" y1="19" x2="12" y2="23"/>
-    <line x1="8" y1="23" x2="16" y2="23"/>
+    <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
   </svg>
 );
 const MicOffIcon = () => (
@@ -14,14 +13,12 @@ const MicOffIcon = () => (
     <line x1="1" y1="1" x2="23" y2="23"/>
     <path d="M9 9v3a3 3 0 005.12 2.12M15 9.34V4a3 3 0 00-5.94-.6"/>
     <path d="M17 16.95A7 7 0 015 12v-2m14 0v2a7 7 0 01-.11 1.23"/>
-    <line x1="12" y1="19" x2="12" y2="23"/>
-    <line x1="8" y1="23" x2="16" y2="23"/>
+    <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
   </svg>
 );
 const VideoOnIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="23 7 16 12 23 17 23 7"/>
-    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+    <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
   </svg>
 );
 const VideoOffIcon = () => (
@@ -46,8 +43,84 @@ const ICE_SERVERS = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
   ],
 };
+
+// ── Ring tone generator using Web Audio API ───────────────────────────────────
+const useRingtone = () => {
+  const audioCtxRef = useRef(null);
+  const intervalRef = useRef(null);
+  const activeNodesRef = useRef([]);
+
+  const stopRing = () => {
+    clearInterval(intervalRef.current);
+    activeNodesRef.current.forEach(n => { try { n.stop(); } catch (e) {} });
+    activeNodesRef.current = [];
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+  };
+
+  // Outgoing ring: calm repeating beep (like a phone dialling out)
+  const startOutgoing = () => {
+    stopRing();
+    const playBeep = () => {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        audioCtxRef.current = ctx;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+        activeNodesRef.current = [osc];
+      } catch (e) {}
+    };
+    playBeep();
+    intervalRef.current = setInterval(playBeep, 3000);
+  };
+
+  // Incoming ring: urgent double beep
+  const startIncoming = () => {
+    stopRing();
+    const playDoubleBeep = () => {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        audioCtxRef.current = ctx;
+        const nodes = [];
+        [[0, 520], [0.2, 520]].forEach(([time, freq]) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, ctx.currentTime + time);
+          gain.gain.setValueAtTime(0, ctx.currentTime + time);
+          gain.gain.linearRampToValueAtTime(0.4, ctx.currentTime + time + 0.05);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + time + 0.3);
+          osc.start(ctx.currentTime + time);
+          osc.stop(ctx.currentTime + time + 0.3);
+          nodes.push(osc);
+        });
+        activeNodesRef.current = nodes;
+      } catch (e) {}
+    };
+    playDoubleBeep();
+    intervalRef.current = setInterval(playDoubleBeep, 2000);
+  };
+
+  return { startOutgoing, startIncoming, stopRing };
+};
+// ─────────────────────────────────────────────────────────────────────────────
 
 const VideoCall = () => {
   const { socket, userData, callState, setCallState, incomingCall, setIncomingCall } = useContext(AppContent);
@@ -57,21 +130,42 @@ const VideoCall = () => {
   const remoteAudioRef = useRef(null);
   const peerRef = useRef(null);
   const localStreamRef = useRef(null);
-  const remoteStreamRef = useRef(null); // store remote stream separately
+  const remoteStreamRef = useRef(null);
+  const callTypeRef = useRef(null);
 
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [callDuration, setCallDuration] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
+  const [iceState, setIceState] = useState("");
   const timerRef = useRef(null);
 
-  const callTypeRef = useRef(null); // use ref so it's always fresh inside callbacks
-  const isVideoCall = callTypeRef.current === "video";
+  const { startOutgoing, startIncoming, stopRing } = useRingtone();
+
+  // ── Start outgoing ring when calling ─────────────────────────────────────
+  useEffect(() => {
+    if (callState?.status === "calling") {
+      startOutgoing();
+    } else {
+      stopRing();
+    }
+  }, [callState?.status]);
+
+  // ── Start incoming ring when call arrives ─────────────────────────────────
+  useEffect(() => {
+    if (incomingCall && !callState) {
+      startIncoming();
+    } else {
+      stopRing();
+    }
+  }, [incomingCall, callState]);
 
   useEffect(() => {
     if (callState?.type) callTypeRef.current = callState.type;
+  }, [callState?.type]);
+  useEffect(() => {
     if (incomingCall?.type) callTypeRef.current = incomingCall.type;
-  }, [callState?.type, incomingCall?.type]);
+  }, [incomingCall?.type]);
 
   useEffect(() => {
     if (isConnected) {
@@ -82,61 +176,57 @@ const VideoCall = () => {
 
   const formatDuration = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
-  // Attach remote stream to video/audio elements whenever they're ready
   const attachRemoteStream = (stream) => {
     remoteStreamRef.current = stream;
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = stream;
-    }
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = stream;
-    }
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = stream;
   };
 
-  // Re-attach when elements mount (handles timing issue)
   useEffect(() => {
-    if (remoteStreamRef.current) {
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
-      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = remoteStreamRef.current;
+    if (!remoteStreamRef.current) return;
+    if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
+      remoteVideoRef.current.srcObject = remoteStreamRef.current;
+    }
+    if (remoteAudioRef.current && !remoteAudioRef.current.srcObject) {
+      remoteAudioRef.current.srcObject = remoteStreamRef.current;
     }
   });
 
   const getLocalStream = async () => {
-    const video = callTypeRef.current === "video";
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video });
-    localStreamRef.current = stream;
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
+    const isVideo = callTypeRef.current === "video";
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
+      localStreamRef.current = stream;
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+      return stream;
+    } catch (err) {
+      console.warn("Camera failed, falling back to audio only:", err);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      localStreamRef.current = stream;
+      return stream;
     }
-    return stream;
   };
 
   const createPeer = (stream, targetId) => {
     const peer = new RTCPeerConnection(ICE_SERVERS);
-
     stream.getTracks().forEach(track => peer.addTrack(track, stream));
 
     peer.ontrack = (e) => {
-      console.log("🎥 Remote track received:", e.track.kind);
-      attachRemoteStream(e.streams[0]);
+      if (e.streams && e.streams[0]) attachRemoteStream(e.streams[0]);
     };
 
     peer.onicecandidate = (e) => {
-      if (e.candidate) {
-        socket.current?.emit("ice_candidate", { targetId, candidate: e.candidate });
-      }
-    };
-
-    peer.onconnectionstatechange = () => {
-      console.log("🔗 Connection state:", peer.connectionState);
-      if (peer.connectionState === "connected") {
-        setIsConnected(true);
-        setCallState(prev => ({ ...prev, status: "connected" }));
-      }
+      if (e.candidate) socket.current?.emit("ice_candidate", { targetId, candidate: e.candidate });
     };
 
     peer.oniceconnectionstatechange = () => {
-      console.log("🧊 ICE state:", peer.iceConnectionState);
+      const state = peer.iceConnectionState;
+      setIceState(state);
+      if (state === "connected" || state === "completed") {
+        stopRing(); // ← stop ring when connected
+        setIsConnected(true);
+        setCallState(prev => prev ? { ...prev, status: "connected" } : prev);
+      }
     };
 
     peerRef.current = peer;
@@ -147,7 +237,6 @@ const VideoCall = () => {
   useEffect(() => {
     if (callState?.status !== "calling") return;
     callTypeRef.current = callState.type;
-
     (async () => {
       try {
         const stream = await getLocalStream();
@@ -155,21 +244,16 @@ const VideoCall = () => {
         const offer = await peer.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: callState.type === "video" });
         await peer.setLocalDescription(offer);
         socket.current?.emit("call_offer", {
-          targetId: callState.targetId,
-          offer,
-          callerId: userData.id,
-          callerName: userData.name,
-          type: callState.type,
+          targetId: callState.targetId, offer,
+          callerId: userData.id, callerName: userData.name, type: callState.type,
         });
-      } catch (err) {
-        console.error("Failed to start call:", err);
-        endCall();
-      }
+      } catch (err) { console.error("Failed to start call:", err); endCall(); }
     })();
   }, [callState?.status]);
 
   // Callee side
   const acceptCall = async () => {
+    stopRing(); // ← stop ring on accept
     try {
       callTypeRef.current = incomingCall.type;
       const stream = await getLocalStream();
@@ -178,43 +262,27 @@ const VideoCall = () => {
       const answer = await peer.createAnswer();
       await peer.setLocalDescription(answer);
       socket.current?.emit("call_answer", { targetId: incomingCall.callerId, answer });
-      setCallState({
-        status: "connected",
-        targetId: incomingCall.callerId,
-        targetName: incomingCall.callerName,
-        type: incomingCall.type,
-      });
+      setCallState({ status: "connected", targetId: incomingCall.callerId, targetName: incomingCall.callerName, type: incomingCall.type });
       setIsConnected(true);
       setIncomingCall(null);
-    } catch (err) {
-      console.error("Failed to accept call:", err);
-      endCall();
-    }
+    } catch (err) { console.error("Failed to accept call:", err); endCall(); }
   };
 
   // Socket listeners
   useEffect(() => {
     if (!socket.current) return;
-
     const handleAnswer = async ({ answer }) => {
-      console.log("📞 Got answer from callee");
-      if (peerRef.current) {
-        await peerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-      }
+      if (peerRef.current) await peerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
     };
-
     const handleIce = async ({ candidate }) => {
       if (peerRef.current && candidate) {
         try { await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
       }
     };
-
     const handleCallEnded = () => endCall(false);
-
     socket.current.on("call_answered", handleAnswer);
     socket.current.on("ice_candidate", handleIce);
     socket.current.on("call_ended", handleCallEnded);
-
     return () => {
       socket.current?.off("call_answered", handleAnswer);
       socket.current?.off("ice_candidate", handleIce);
@@ -223,6 +291,7 @@ const VideoCall = () => {
   }, [socket.current]);
 
   const endCall = (notify = true) => {
+    stopRing(); // ← always stop ring on end
     if (notify) {
       const targetId = callState?.targetId || incomingCall?.callerId;
       if (targetId) socket.current?.emit("call_end", { targetId });
@@ -238,12 +307,14 @@ const VideoCall = () => {
     clearInterval(timerRef.current);
     setCallDuration(0);
     setIsConnected(false);
+    setIceState("");
     setCallState(null);
     setIncomingCall(null);
     callTypeRef.current = null;
   };
 
   const declineCall = () => {
+    stopRing(); // ← stop ring on decline
     socket.current?.emit("call_reject", { targetId: incomingCall.callerId });
     setIncomingCall(null);
   };
@@ -252,22 +323,24 @@ const VideoCall = () => {
     localStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
     setMicOn(prev => !prev);
   };
-
   const toggleCam = () => {
     localStreamRef.current?.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
     setCamOn(prev => !prev);
   };
 
-  const activeCallType = callState?.type || incomingCall?.type;
-  const isVideo = activeCallType === "video";
+  const isVideo = (callState?.type || incomingCall?.type) === "video";
 
   // ── Incoming call UI ──────────────────────────────────────────────────────
   if (incomingCall && !callState) {
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100]">
         <div className="bg-white rounded-2xl shadow-2xl p-6 w-72 text-center">
-          <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-2xl font-bold mx-auto mb-3">
-            {incomingCall.callerName?.[0]?.toUpperCase()}
+          {/* Pulsing ring animation */}
+          <div className="relative w-16 h-16 mx-auto mb-3">
+            <div className="absolute inset-0 rounded-full bg-blue-100 animate-ping opacity-60" />
+            <div className="relative w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-2xl font-bold">
+              {incomingCall.callerName?.[0]?.toUpperCase()}
+            </div>
           </div>
           <p className="text-xs text-gray-400 mb-0.5">Incoming {incomingCall.type} call</p>
           <h3 className="text-gray-900 font-semibold text-base mb-5">{incomingCall.callerName}</h3>
@@ -294,46 +367,41 @@ const VideoCall = () => {
 
     return (
       <div className="fixed inset-0 bg-[#0f0f1a] z-[100] flex flex-col">
+        <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} />
 
-        {/* Always render audio for remote sound */}
-        <audio ref={remoteAudioRef} autoPlay playsInline />
-
-        {/* Remote video fullscreen */}
         {isVideo && (
-          <video ref={remoteVideoRef} autoPlay playsInline
-            className="absolute inset-0 w-full h-full object-cover"
-          />
+          <video ref={remoteVideoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover" />
         )}
 
-        {/* Audio only background */}
         {!isVideo && (
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <div className="w-24 h-24 rounded-full bg-blue-600 flex items-center justify-center text-white text-4xl font-bold mb-4 shadow-2xl">
-              {targetName?.[0]?.toUpperCase()}
+            <div className="relative mb-4">
+              {isCalling && <div className="absolute inset-0 rounded-full bg-blue-500 animate-ping opacity-40" />}
+              <div className="relative w-24 h-24 rounded-full bg-blue-600 flex items-center justify-center text-white text-4xl font-bold shadow-2xl">
+                {targetName?.[0]?.toUpperCase()}
+              </div>
             </div>
             <h2 className="text-white text-xl font-semibold">{targetName}</h2>
             <p className="text-gray-400 text-sm mt-1">{isCalling ? "Calling..." : formatDuration(callDuration)}</p>
           </div>
         )}
 
-        {/* Video overlay info */}
         {isVideo && (
           <div className="absolute top-6 left-0 right-0 flex flex-col items-center z-10 pointer-events-none">
             <h2 className="text-white text-lg font-semibold drop-shadow-lg">{targetName}</h2>
             <p className="text-gray-300 text-sm">{isCalling ? "Calling..." : formatDuration(callDuration)}</p>
+            {iceState && iceState !== "connected" && iceState !== "completed" && (
+              <p className="text-yellow-400 text-xs mt-1">Network: {iceState}</p>
+            )}
           </div>
         )}
 
-        {/* Local video PiP */}
         {isVideo && (
           <div className="absolute bottom-28 right-4 w-32 h-44 rounded-xl overflow-hidden border-2 border-white/20 shadow-xl z-10">
-            <video ref={localVideoRef} autoPlay playsInline muted
-              className="w-full h-full object-cover scale-x-[-1]"
-            />
+            <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
           </div>
         )}
 
-        {/* Controls */}
         <div className="absolute bottom-0 left-0 right-0 pb-8 pt-4 bg-gradient-to-t from-black/80 to-transparent flex items-center justify-center gap-5 z-10">
           <button onClick={toggleMic}
             className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors shadow-lg ${micOn ? "bg-white/20 hover:bg-white/30 text-white" : "bg-red-500 hover:bg-red-600 text-white"}`}>
