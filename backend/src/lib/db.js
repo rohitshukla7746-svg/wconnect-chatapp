@@ -11,6 +11,11 @@ const pool = new Pool({
   }
 });
 
+// Prevent unhandled error events from crashing the process
+pool.on("error", (err) => {
+  console.error("Unexpected DB pool error:", err.message);
+});
+
 pool.connect()
   .then(() => console.log("✅ DB connected successfully"))
   .catch((err) => console.error("❌ DB not connected", err));

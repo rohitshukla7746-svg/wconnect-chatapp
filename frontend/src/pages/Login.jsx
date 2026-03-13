@@ -9,7 +9,7 @@ import { motion } from "framer-motion";
 const Login = () => {
 
   const navigate = useNavigate();
-  const { backendUrl, setIsLoggedin, getUserData, initSocket } = useContext(AppContent);
+  const { backendUrl, setIsLoggedin, getUserData, setAuthToken, initSocket } = useContext(AppContent);
 
   const [state, setState] = useState('signup');
   const [name, setName] = useState('');
@@ -25,7 +25,7 @@ const Login = () => {
         const data = res.data;
 
         if (data.success) {
-          // Cookie is set automatically by backend
+          setAuthToken(data.token);
           setIsLoggedin(true);
           getUserData();
           initSocket(data.user.id);
@@ -39,7 +39,7 @@ const Login = () => {
         const data = res.data;
 
         if (data.success) {
-          // Cookie is set automatically by backend
+          setAuthToken(data.token);
           setIsLoggedin(true);
           getUserData();
           initSocket(data.user.id);

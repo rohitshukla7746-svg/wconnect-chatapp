@@ -5,9 +5,6 @@ import { io } from "socket.io-client";
 
 export const AppContent = createContext();
 
-// Use cookies only — send credentials with every request
-axios.defaults.withCredentials = true;
-
 export const AppContextProvider = (props) => {
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -29,16 +26,28 @@ export const AppContextProvider = (props) => {
   useEffect(() => { selectedRoomRef.current = selectedRoom; }, [selectedRoom]);
   useEffect(() => { selectedUserRef.current = selectedUser; }, [selectedUser]);
 
+  // Save token to localStorage and set axios Authorization header
+  const setAuthToken = (token) => {
+    if (token) {
+      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+      localStorage.setItem("token", token);
+    } else {
+      delete axios.defaults.headers.common["Authorization"];
+      localStorage.removeItem("token");
+    }
+  };
+
   const initSocket = (userId) => {
-    // Destroy old socket if exists
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
     }
 
+    const token = localStorage.getItem("token");
+
     const socket = io(backendUrl, {
-      withCredentials: true,
-      transports: ["websocket"],
+      auth: { token },
+      transports: ["websocket", "polling"],
     });
 
     socket.on("connect", () => {
@@ -78,6 +87,11 @@ export const AppContextProvider = (props) => {
   };
 
   const getAuthState = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    setAuthToken(token);
+
     try {
       const res = await axios.get(backendUrl + "/api/auth/is-auth");
       if (res.data.success) {
@@ -89,7 +103,11 @@ export const AppContextProvider = (props) => {
         }
       }
     } catch (error) {
-      if (error.response?.status !== 401) console.log(error);
+      if (error.response?.status === 401) {
+        setAuthToken(null);
+      } else {
+        console.log(error);
+      }
     }
   };
 
@@ -190,7 +208,7 @@ export const AppContextProvider = (props) => {
   }, [isLoggedin]);
 
   useEffect(() => {
-    setMessages([]); // clear immediately to prevent stale messages showing
+    setMessages([]);
     if (selectedRoom) {
       getRoomMessages(selectedRoom.id);
       joinRoomSocket(selectedRoom.id);
@@ -198,7 +216,7 @@ export const AppContextProvider = (props) => {
   }, [selectedRoom]);
 
   useEffect(() => {
-    setDmMessages([]); // clear immediately to prevent stale messages showing
+    setDmMessages([]);
     if (selectedUser) {
       getDmMessages(selectedUser.id);
     }
@@ -208,7 +226,7 @@ export const AppContextProvider = (props) => {
     backendUrl,
     isLoggedin, setIsLoggedin,
     userData, setUserData,
-    getUserData, initSocket,
+    getUserData, setAuthToken, initSocket,
     rooms, setRooms, getRooms,
     allUsers, getAllUsers,
     selectedRoom, setSelectedRoom,
