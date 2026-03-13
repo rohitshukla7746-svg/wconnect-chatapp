@@ -9,12 +9,12 @@ import { motion } from "framer-motion";
 const Login = () => {
 
   const navigate = useNavigate();
-  const { backendUrl, setIsLoggedin, getUserData, setAuthToken } = useContext(AppContent)
+  const { backendUrl, setIsLoggedin, getUserData, initSocket } = useContext(AppContent);
 
-  const [state, setState] = useState('signup')
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [state, setState] = useState('signup');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   const onSubmitHandle = async (e) => {
     e.preventDefault();
@@ -25,10 +25,10 @@ const Login = () => {
         const data = res.data;
 
         if (data.success) {
-          localStorage.setItem('token', data.token);  // ← save token
-          setAuthToken(data.token);                    // ← set in axios headers
+          // Cookie is set automatically by backend
           setIsLoggedin(true);
           getUserData();
+          initSocket(data.user.id);
           navigate('/');
         } else {
           toast.error(data.message);
@@ -39,10 +39,10 @@ const Login = () => {
         const data = res.data;
 
         if (data.success) {
-          localStorage.setItem('token', data.token);  // ← save token
-          setAuthToken(data.token);                    // ← set in axios headers
+          // Cookie is set automatically by backend
           setIsLoggedin(true);
           getUserData();
+          initSocket(data.user.id);
           navigate('/');
         } else {
           toast.error(data.message);

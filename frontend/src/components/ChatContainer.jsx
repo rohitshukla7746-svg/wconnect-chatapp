@@ -1,5 +1,7 @@
 import React, { useContext, useRef, useEffect, useState } from 'react';
 import { AppContent } from '../context/AppContext';
+import axios from 'axios';
+import { toast } from 'react-toastify';
 
 // SVG Icons
 const PhoneIcon = () => (
@@ -61,18 +63,29 @@ const WaveIcon = () => (
   </svg>
 );
 
+const TrashIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6"/>
+    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+    <path d="M10 11v6M14 11v6"/>
+    <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+  </svg>
+);
+
 const ChatContainer = () => {
   const {
     selectedRoom, setSelectedRoom,
     selectedUser, setSelectedUser,
-    messages, dmMessages,
+    messages, setMessages,
+    dmMessages, setDmMessages,
     sendMessage, sendDm,
-    userData,
+    userData, backendUrl,
   } = useContext(AppContent);
 
   const [input, setInput] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
+  const [hoveredMsg, setHoveredMsg] = useState(null);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -115,6 +128,25 @@ const ChatContainer = () => {
       if (isRoom) await sendMessage(selectedRoom.id, input);
       else if (selectedUser) await sendDm(selectedUser.id, input);
       setInput("");
+    }
+  };
+
+  const handleDeleteMessage = async (msg) => {
+    try {
+      const endpoint = isRoom
+        ? `${backendUrl}/api/messages/message/${msg.id}`
+        : `${backendUrl}/api/messages/dm/${msg.id}`;
+      const res = await axios.delete(endpoint);
+      if (res.data.success) {
+        if (isRoom) {
+          setMessages(prev => prev.filter(m => m.id !== msg.id));
+        } else {
+          setDmMessages(prev => prev.filter(m => m.id !== msg.id));
+        }
+        toast.success("Message deleted");
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to delete message");
     }
   };
 
@@ -202,6 +234,8 @@ const ChatContainer = () => {
               <div
                 key={msg.id}
                 className={`flex gap-3 ${isSelf ? "flex-row-reverse" : "flex-row"} ${showAvatar ? "mt-4" : "mt-0.5"}`}
+                onMouseEnter={() => setHoveredMsg(msg.id)}
+                onMouseLeave={() => setHoveredMsg(null)}
               >
                 {showAvatar ? (
                   <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-bold bg-gradient-to-tr ${isSelf ? "from-indigo-500 to-purple-500" : "from-pink-500 to-orange-400"}`}>
@@ -222,12 +256,24 @@ const ChatContainer = () => {
                       </span>
                     </div>
                   )}
-                  <div className={`px-4 py-2 rounded-2xl text-sm leading-relaxed ${isSelf
-                    ? "bg-indigo-600 text-white rounded-tr-sm"
-                    : "bg-[#282142] text-gray-100 rounded-tl-sm border border-gray-700"
-                  } ${isFileMsg ? "flex items-center gap-2" : ""}`}>
-                    {isFileMsg && <FileIcon />}
-                    {msg.content}
+                  <div className="flex items-center gap-2">
+                    {/* Delete button — only for own messages, shows on hover */}
+                    {isSelf && hoveredMsg === msg.id && (
+                      <button
+                        onClick={() => handleDeleteMessage(msg)}
+                        className="text-gray-500 hover:text-red-400 transition-colors p-1"
+                        title="Delete message"
+                      >
+                        <TrashIcon />
+                      </button>
+                    )}
+                    <div className={`px-4 py-2 rounded-2xl text-sm leading-relaxed ${isSelf
+                      ? "bg-indigo-600 text-white rounded-tr-sm"
+                      : "bg-[#282142] text-gray-100 rounded-tl-sm border border-gray-700"
+                    } ${isFileMsg ? "flex items-center gap-2" : ""}`}>
+                      {isFileMsg && <FileIcon />}
+                      {msg.content}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -262,7 +308,6 @@ const ChatContainer = () => {
       {/* Input */}
       <div className="p-4 bg-[#282142] border-t border-gray-700">
         <div className="flex items-center gap-3 max-w-5xl mx-auto">
-
           <input
             ref={fileInputRef}
             type="file"
@@ -270,7 +315,6 @@ const ChatContainer = () => {
             onChange={handleFileSelect}
             className="hidden"
           />
-
           <button
             type="button"
             onClick={() => fileInputRef.current.click()}
@@ -279,7 +323,6 @@ const ChatContainer = () => {
           >
             <AttachIcon />
           </button>
-
           <input
             type="text"
             value={input}
@@ -288,7 +331,6 @@ const ChatContainer = () => {
             placeholder={isRoom ? `Message #${selectedRoom?.name}` : `Message ${selectedUser?.name}`}
             className="flex-1 bg-[#1e1a2d] text-white text-sm rounded-full py-3 px-5 border border-gray-600 outline-none focus:border-indigo-500 transition-all placeholder-gray-500"
           />
-
           <button
             onClick={handleSend}
             disabled={!input.trim() && !selectedFile}
