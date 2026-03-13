@@ -2,16 +2,20 @@ export const initSocket = (io) => {
   const roomUsers = {};
   const onlineUsers = {}; // userId -> socketId
 
+  const broadcastOnlineUsers = () => {
+    // Emit the list of online user IDs to ALL connected clients
+    io.emit("online_users", Object.keys(onlineUsers));
+  };
+
   io.on("connection", (socket) => {
     console.log("🔌 User connected:", socket.id);
 
-    // Register user as online
     socket.on("register", (userId) => {
       onlineUsers[userId] = socket.id;
       console.log(`✅ User ${userId} registered with socket ${socket.id}`);
+      broadcastOnlineUsers(); // notify everyone
     });
 
-    // Broadcast new room to all users
     socket.on("new_room", (room) => {
       socket.broadcast.emit("room_created", room);
     });
@@ -26,11 +30,9 @@ export const initSocket = (io) => {
     });
 
     socket.on("send_message", ({ roomId, message }) => {
-      // Broadcast to everyone in room except sender
       socket.to(roomId).emit("receive_message", message);
     });
 
-    // DM — look up receiver's socket by their user ID
     socket.on("send_dm", ({ receiverId, message }) => {
       const receiverSocketId = onlineUsers[receiverId];
       if (receiverSocketId) {
@@ -48,18 +50,17 @@ export const initSocket = (io) => {
     });
 
     socket.on("disconnect", () => {
-      // Remove from onlineUsers
       for (const userId in onlineUsers) {
         if (onlineUsers[userId] === socket.id) {
           delete onlineUsers[userId];
           break;
         }
       }
-      // Remove from rooms
       for (const roomId in roomUsers) {
         roomUsers[roomId] = roomUsers[roomId].filter(u => u.socketId !== socket.id);
         io.to(roomId).emit("room_users", roomUsers[roomId]);
       }
+      broadcastOnlineUsers(); // notify everyone of disconnect
       console.log("❌ User disconnected:", socket.id);
     });
   });

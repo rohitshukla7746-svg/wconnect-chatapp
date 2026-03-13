@@ -15,7 +15,8 @@ export const AppContextProvider = (props) => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [messages, setMessages] = useState([]);
   const [dmMessages, setDmMessages] = useState([]);
-  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [onlineUsers, setOnlineUsers] = useState([]); // room users (for Online tab)
+  const [onlineUserIds, setOnlineUserIds] = useState(new Set()); // global online user IDs
   const [activeTab, setActiveTab] = useState("rooms");
   const [allUsers, setAllUsers] = useState([]);
 
@@ -26,7 +27,6 @@ export const AppContextProvider = (props) => {
   useEffect(() => { selectedRoomRef.current = selectedRoom; }, [selectedRoom]);
   useEffect(() => { selectedUserRef.current = selectedUser; }, [selectedUser]);
 
-  // Save token to localStorage and set axios Authorization header
   const setAuthToken = (token) => {
     if (token) {
       axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
@@ -83,15 +83,18 @@ export const AppContextProvider = (props) => {
     socket.on("room_users", (users) => setOnlineUsers(users));
     socket.on("room_created", () => getRooms());
 
+    // Global online presence
+    socket.on("online_users", (userIds) => {
+      setOnlineUserIds(new Set(userIds));
+    });
+
     socketRef.current = socket;
   };
 
   const getAuthState = async () => {
     const token = localStorage.getItem("token");
     if (!token) return;
-
     setAuthToken(token);
-
     try {
       const res = await axios.get(backendUrl + "/api/auth/is-auth");
       if (res.data.success) {
@@ -234,6 +237,7 @@ export const AppContextProvider = (props) => {
     messages, setMessages,
     dmMessages, setDmMessages,
     onlineUsers,
+    onlineUserIds, // <-- expose this for checking if a user is online
     activeTab, setActiveTab,
     sendMessage, sendDm,
     getRoomMessages, getDmMessages,

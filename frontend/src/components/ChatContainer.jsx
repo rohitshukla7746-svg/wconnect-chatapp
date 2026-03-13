@@ -79,7 +79,7 @@ const ChatContainer = () => {
     messages, setMessages,
     dmMessages, setDmMessages,
     sendMessage, sendDm,
-    userData, backendUrl,
+    userData, backendUrl, onlineUserIds,
   } = useContext(AppContent);
 
   const [input, setInput] = useState("");
@@ -190,7 +190,7 @@ const ChatContainer = () => {
                 {isRoom ? "#" : currentTarget?.name?.[0]?.toUpperCase()}
               </div>
             )}
-            {!isRoom && (
+            {!isRoom && onlineUserIds?.has(selectedUser?.id) && (
               <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-[#282142] rounded-full" />
             )}
           </div>
@@ -200,7 +200,7 @@ const ChatContainer = () => {
               {isRoom ? `# ${selectedRoom.name}` : selectedUser?.name}
             </h2>
             <p className="text-[10px] text-green-400 font-medium">
-              {isRoom ? `${selectedRoom.member_count || ""} members` : "Online"}
+              {isRoom ? `${selectedRoom.member_count || ""} members` : onlineUserIds?.has(selectedUser?.id) ? "Online" : "Offline"}
             </p>
           </div>
         </div>
