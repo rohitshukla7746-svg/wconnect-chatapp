@@ -53,28 +53,56 @@ const VideoCall = () => {
   const { socket, userData, callState, setCallState, incomingCall, setIncomingCall } = useContext(AppContent);
 
   const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);  // video only
-  const remoteAudioRef = useRef(null);  // audio only
+  const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
   const peerRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null); // store remote stream separately
 
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [callDuration, setCallDuration] = useState(0);
+  const [isConnected, setIsConnected] = useState(false);
   const timerRef = useRef(null);
 
-  const isVideoCall = callState?.type === "video" || incomingCall?.type === "video";
+  const callTypeRef = useRef(null); // use ref so it's always fresh inside callbacks
+  const isVideoCall = callTypeRef.current === "video";
 
   useEffect(() => {
-    if (callState?.status === "connected") {
+    if (callState?.type) callTypeRef.current = callState.type;
+    if (incomingCall?.type) callTypeRef.current = incomingCall.type;
+  }, [callState?.type, incomingCall?.type]);
+
+  useEffect(() => {
+    if (isConnected) {
       timerRef.current = setInterval(() => setCallDuration(d => d + 1), 1000);
     }
     return () => clearInterval(timerRef.current);
-  }, [callState?.status]);
+  }, [isConnected]);
 
   const formatDuration = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
-  const getLocalStream = async (video = true) => {
+  // Attach remote stream to video/audio elements whenever they're ready
+  const attachRemoteStream = (stream) => {
+    remoteStreamRef.current = stream;
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = stream;
+    }
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = stream;
+    }
+  };
+
+  // Re-attach when elements mount (handles timing issue)
+  useEffect(() => {
+    if (remoteStreamRef.current) {
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = remoteStreamRef.current;
+    }
+  });
+
+  const getLocalStream = async () => {
+    const video = callTypeRef.current === "video";
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video });
     localStreamRef.current = stream;
     if (localVideoRef.current) {
@@ -86,18 +114,11 @@ const VideoCall = () => {
   const createPeer = (stream, targetId) => {
     const peer = new RTCPeerConnection(ICE_SERVERS);
 
-    // Add all local tracks to peer
     stream.getTracks().forEach(track => peer.addTrack(track, stream));
 
-    // When remote tracks arrive, attach to correct element
     peer.ontrack = (e) => {
-      const remoteStream = e.streams[0];
-      if (isVideoCall && remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = remoteStream;
-      }
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = remoteStream;
-      }
+      console.log("🎥 Remote track received:", e.track.kind);
+      attachRemoteStream(e.streams[0]);
     };
 
     peer.onicecandidate = (e) => {
@@ -107,24 +128,31 @@ const VideoCall = () => {
     };
 
     peer.onconnectionstatechange = () => {
+      console.log("🔗 Connection state:", peer.connectionState);
       if (peer.connectionState === "connected") {
+        setIsConnected(true);
         setCallState(prev => ({ ...prev, status: "connected" }));
       }
+    };
+
+    peer.oniceconnectionstatechange = () => {
+      console.log("🧊 ICE state:", peer.iceConnectionState);
     };
 
     peerRef.current = peer;
     return peer;
   };
 
-  // Caller: get stream → create peer → create offer → send
+  // Caller side
   useEffect(() => {
     if (callState?.status !== "calling") return;
+    callTypeRef.current = callState.type;
 
     (async () => {
       try {
-        const stream = await getLocalStream(isVideoCall);
+        const stream = await getLocalStream();
         const peer = createPeer(stream, callState.targetId);
-        const offer = await peer.createOffer();
+        const offer = await peer.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: callState.type === "video" });
         await peer.setLocalDescription(offer);
         socket.current?.emit("call_offer", {
           targetId: callState.targetId,
@@ -140,16 +168,23 @@ const VideoCall = () => {
     })();
   }, [callState?.status]);
 
-  // Callee: get stream → create peer → set remote → create answer → send
+  // Callee side
   const acceptCall = async () => {
     try {
-      const stream = await getLocalStream(isVideoCall);
+      callTypeRef.current = incomingCall.type;
+      const stream = await getLocalStream();
       const peer = createPeer(stream, incomingCall.callerId);
       await peer.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
       const answer = await peer.createAnswer();
       await peer.setLocalDescription(answer);
       socket.current?.emit("call_answer", { targetId: incomingCall.callerId, answer });
-      setCallState({ status: "connected", targetId: incomingCall.callerId, targetName: incomingCall.callerName, type: incomingCall.type });
+      setCallState({
+        status: "connected",
+        targetId: incomingCall.callerId,
+        targetName: incomingCall.callerName,
+        type: incomingCall.type,
+      });
+      setIsConnected(true);
       setIncomingCall(null);
     } catch (err) {
       console.error("Failed to accept call:", err);
@@ -162,9 +197,9 @@ const VideoCall = () => {
     if (!socket.current) return;
 
     const handleAnswer = async ({ answer }) => {
+      console.log("📞 Got answer from callee");
       if (peerRef.current) {
         await peerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-        setCallState(prev => ({ ...prev, status: "connected" }));
       }
     };
 
@@ -196,13 +231,16 @@ const VideoCall = () => {
     peerRef.current = null;
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     localStreamRef.current = null;
+    remoteStreamRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     clearInterval(timerRef.current);
     setCallDuration(0);
+    setIsConnected(false);
     setCallState(null);
     setIncomingCall(null);
+    callTypeRef.current = null;
   };
 
   const declineCall = () => {
@@ -219,6 +257,9 @@ const VideoCall = () => {
     localStreamRef.current?.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
     setCamOn(prev => !prev);
   };
+
+  const activeCallType = callState?.type || incomingCall?.type;
+  const isVideo = activeCallType === "video";
 
   // ── Incoming call UI ──────────────────────────────────────────────────────
   if (incomingCall && !callState) {
@@ -254,41 +295,37 @@ const VideoCall = () => {
     return (
       <div className="fixed inset-0 bg-[#0f0f1a] z-[100] flex flex-col">
 
-        {/* Always render audio element for remote audio */}
-        <audio ref={remoteAudioRef} autoPlay />
+        {/* Always render audio for remote sound */}
+        <audio ref={remoteAudioRef} autoPlay playsInline />
 
-        {/* Remote video (full screen) */}
-        {isVideoCall && (
+        {/* Remote video fullscreen */}
+        {isVideo && (
           <video ref={remoteVideoRef} autoPlay playsInline
             className="absolute inset-0 w-full h-full object-cover"
           />
         )}
 
-        {/* Audio-only background */}
-        {!isVideoCall && (
+        {/* Audio only background */}
+        {!isVideo && (
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <div className="w-24 h-24 rounded-full bg-blue-600 flex items-center justify-center text-white text-4xl font-bold mb-4 shadow-2xl">
               {targetName?.[0]?.toUpperCase()}
             </div>
             <h2 className="text-white text-xl font-semibold">{targetName}</h2>
-            <p className="text-gray-400 text-sm mt-1">
-              {isCalling ? "Calling..." : formatDuration(callDuration)}
-            </p>
+            <p className="text-gray-400 text-sm mt-1">{isCalling ? "Calling..." : formatDuration(callDuration)}</p>
           </div>
         )}
 
-        {/* Video call overlay info */}
-        {isVideoCall && (
+        {/* Video overlay info */}
+        {isVideo && (
           <div className="absolute top-6 left-0 right-0 flex flex-col items-center z-10 pointer-events-none">
             <h2 className="text-white text-lg font-semibold drop-shadow-lg">{targetName}</h2>
-            <p className="text-gray-300 text-sm">
-              {isCalling ? "Calling..." : formatDuration(callDuration)}
-            </p>
+            <p className="text-gray-300 text-sm">{isCalling ? "Calling..." : formatDuration(callDuration)}</p>
           </div>
         )}
 
-        {/* Local video (picture-in-picture) */}
-        {isVideoCall && (
+        {/* Local video PiP */}
+        {isVideo && (
           <div className="absolute bottom-28 right-4 w-32 h-44 rounded-xl overflow-hidden border-2 border-white/20 shadow-xl z-10">
             <video ref={localVideoRef} autoPlay playsInline muted
               className="w-full h-full object-cover scale-x-[-1]"
@@ -302,7 +339,7 @@ const VideoCall = () => {
             className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors shadow-lg ${micOn ? "bg-white/20 hover:bg-white/30 text-white" : "bg-red-500 hover:bg-red-600 text-white"}`}>
             {micOn ? <MicOnIcon /> : <MicOffIcon />}
           </button>
-          {isVideoCall && (
+          {isVideo && (
             <button onClick={toggleCam}
               className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors shadow-lg ${camOn ? "bg-white/20 hover:bg-white/30 text-white" : "bg-red-500 hover:bg-red-600 text-white"}`}>
               {camOn ? <VideoOnIcon /> : <VideoOffIcon />}
